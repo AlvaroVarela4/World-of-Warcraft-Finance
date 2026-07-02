@@ -11,9 +11,15 @@ __pycache__/
 # IDE
 .vscode/
 .idea/
+.claude/
 
 # Logs
 logs/
+*.log
 
 # Database
 *.db
+
+# Frontend
+frontend/node_modules/
+frontend/dist/

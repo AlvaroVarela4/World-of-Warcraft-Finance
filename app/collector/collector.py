@@ -1,4 +1,7 @@
 import logging
+from datetime import datetime
+
+from sqlalchemy import insert
 
 from app.collector.blizzard_client import BlizzardClient
 from app.database.session import SessionLocal
@@ -17,25 +20,67 @@ def _unit_price(raw: dict) -> int | None:
     return None  # solo puja, sin compra directa -> lo ignoramos
 
 
-def save_commodities(client: BlizzardClient) -> int:
-    data = client.get_commodities()
+def _save_auctions(connected_realm_id: int | None, source: str, auctions: list[dict]) -> int:
+    """Crea un snapshot e inserta sus subastas con un INSERT en bloque.
+
+    Usamos Core (insert() + lista de dicts) en vez de instanciar objetos ORM
+    Auction uno a uno: con decenas/cientos de miles de filas por snapshot
+    (commodities ronda las 200k), SQLAlchemy agrupa los valores en pocas
+    sentencias INSERT en lugar de gestionar cada fila en el unit-of-work,
+    lo que reduce la carga de varios minutos a unos segundos.
+    """
     with SessionLocal() as session:
-        snapshot = Snapshot(connected_realm_id=None, source="commodities")
+        snapshot = Snapshot(connected_realm_id=connected_realm_id, source=source)
         session.add(snapshot)
         session.flush()  # para disponer de snapshot.id
 
         rows = [
-            Auction(
-                snapshot_id=snapshot.id,
-                item_id=a["item"]["id"],
-                quantity=a["quantity"],
-                unit_price=price,
-                time_left=a.get("time_left"),
-            )
-            for a in data["auctions"]
+            {
+                "snapshot_id": snapshot.id,
+                "item_id": a["item"]["id"],
+                "quantity": a["quantity"],
+                "unit_price": price,
+                "time_left": a.get("time_left"),
+            }
+            for a in auctions
             if (price := _unit_price(a)) is not None
         ]
-        session.add_all(rows)
+        if rows:
+            session.execute(insert(Auction), rows)
         session.commit()
-        logger.info("Guardadas %s subastas (snapshot %s)", len(rows), snapshot.id)
         return len(rows)
+
+
+def save_commodities(client: BlizzardClient, since: datetime | None = None) -> int | None:
+    """Descarga y guarda las commodities de la región.
+
+    Con `since` (fetched_at del último snapshot), devuelve None sin tocar la
+    BD si Blizzard no ha publicado un volcado nuevo desde entonces.
+    """
+    data = client.get_commodities(since=since)
+    if data is None:
+        logger.info("Commodities sin cambios desde el último snapshot; no se guarda nada")
+        return None
+    count = _save_auctions(None, "commodities", data["auctions"])
+    logger.info("Guardadas %s subastas (commodities)", count)
+    return count
+
+
+def save_realm_auctions(
+    client: BlizzardClient, connected_realm_id: int, since: datetime | None = None
+) -> int | None:
+    """Descarga y guarda las subastas de un connected realm concreto.
+
+    Con `since` (fetched_at del último snapshot del reino), devuelve None sin
+    tocar la BD si Blizzard no ha publicado un volcado nuevo desde entonces.
+    """
+    data = client.get_auctions(connected_realm_id, since=since)
+    if data is None:
+        logger.info(
+            "Realm %s sin cambios desde el último snapshot; no se guarda nada",
+            connected_realm_id,
+        )
+        return None
+    count = _save_auctions(connected_realm_id, "realm", data["auctions"])
+    logger.info("Guardadas %s subastas del realm %s", count, connected_realm_id)
+    return count
