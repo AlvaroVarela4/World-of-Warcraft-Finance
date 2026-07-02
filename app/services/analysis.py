@@ -223,7 +223,7 @@ def items_in_realm(connected_realm_id: int, name_filter: str = "", limit: int = 
             return []
 
         # Outer join: partimos de Auction para que aparezcan items aunque no
-        # estén en la tabla Item todavía (resolve.py no ejecutado para este reino).
+        # estén resueltos en la tabla Item todavía.
         q = (
             select(
                 Auction.item_id.label("id"),

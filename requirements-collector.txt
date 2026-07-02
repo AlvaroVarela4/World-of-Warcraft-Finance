@@ -1,6 +1,6 @@
 # Dependencias mínimas del recolector (scheduler.py y app/collector).
-# Sin FastAPI/Streamlit/pandas: la imagen Docker y los runners de CI
-# instalan solo lo necesario para capturar snapshots.
+# Sin FastAPI ni el resto de la API: la imagen Docker del scheduler
+# instala solo lo necesario para capturar snapshots.
 APScheduler>=3.10,<4
 httpx==0.28.1
 psycopg2-binary==2.9.12

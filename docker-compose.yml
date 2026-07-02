@@ -18,10 +18,9 @@ services:
       retries: 5
 
   # Recolector de histórico: captura snapshots de subastas cada
-  # SCHEDULER_INTERVAL_MINUTES mientras el stack esté levantado.
-  # Nota: sigue corriendo en esta máquina; para capturar 24/7 con el PC
-  # apagado usa el workflow de GitHub Actions (.github/workflows/) contra
-  # una BD cloud, o lleva este mismo compose a un VPS.
+  # SCHEDULER_INTERVAL_MINUTES mientras el stack esté levantado, y se
+  # reinicia solo al encender el PC (restart: unless-stopped). Si algún día
+  # hace falta capturar 24/7, este mismo compose funciona tal cual en un VPS.
   scheduler:
     build: .
     container_name: wow_scheduler

@@ -18,9 +18,11 @@ responde 304 no se almacena nada, así que el histórico no acumula snapshots
 duplicados aunque el scheduler corra más a menudo de lo que Blizzard publica.
 
 Uso:
-    python scheduler.py          # proceso residente: captura al arrancar y cada intervalo
-    python scheduler.py --once   # una sola captura y termina (para cron externo:
-                                 # GitHub Actions, Task Scheduler, cron de un VPS...)
+    docker compose up -d         # forma recomendada: corre junto a Postgres
+                                 # y se reinicia solo con el PC (restart: unless-stopped)
+    python scheduler.py          # proceso residente fuera de Docker
+    python scheduler.py --once   # una sola captura y termina (pruebas, o cron
+                                 # externo tipo Task Scheduler)
 
 En el primer arranque contra una BD vacía puebla solo el registro de reinos;
 las capturas empiezan cuando hay reinos objetivo (SCHEDULER_REALMS o algún
@@ -40,7 +42,7 @@ from app.collector.realms import sync_realms
 from app.config import settings
 from app.database.models import Realm, Snapshot
 from app.database.session import SessionLocal, init_db
-from app.services.analysis import latest_realm_snapshot_id
+from app.services.analysis import latest_realm_snapshot_id, latest_snapshot_id
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -143,7 +145,11 @@ def capture_market_snapshots() -> None:
 
         if settings.scheduler_include_commodities:
             try:
-                save_commodities(client, since=_last_fetched_at(None, "commodities"))
+                count = save_commodities(client, since=_last_fetched_at(None, "commodities"))
+                if count is not None:
+                    snap_id = latest_snapshot_id("commodities")
+                    if snap_id:
+                        resolve_items(client, item_ids_in_snapshot(snap_id))
             except Exception:
                 logger.exception("Commodities: fallo capturando el snapshot")
     finally:

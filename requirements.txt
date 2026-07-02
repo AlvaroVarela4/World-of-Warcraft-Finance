@@ -9,14 +9,11 @@ h11==0.16.0
 httpcore==1.0.9
 httpx==0.28.1
 idna==3.18
-pandas>=2.0
-plotly>=5.0
 psycopg2-binary==2.9.12
 pydantic==2.13.4
 pydantic-settings==2.14.2
 pydantic_core==2.46.4
 python-dotenv==1.2.2
 SQLAlchemy==2.0.51
-streamlit>=1.30
 typing-inspection==0.4.2
 typing_extensions==4.15.0
