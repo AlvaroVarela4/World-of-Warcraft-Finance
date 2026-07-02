@@ -18,12 +18,16 @@ responde 304 no se almacena nada, así que el histórico no acumula snapshots
 duplicados aunque el scheduler corra más a menudo de lo que Blizzard publica.
 
 Uso:
-    python scheduler.py
+    python scheduler.py          # proceso residente: captura al arrancar y cada intervalo
+    python scheduler.py --once   # una sola captura y termina (para cron externo:
+                                 # GitHub Actions, Task Scheduler, cron de un VPS...)
 
-Se ejecuta una primera captura inmediata al arrancar y después una por
-intervalo. Detener con Ctrl+C.
+En el primer arranque contra una BD vacía puebla solo el registro de reinos;
+las capturas empiezan cuando hay reinos objetivo (SCHEDULER_REALMS o algún
+snapshot previo). Detener el modo residente con Ctrl+C.
 """
 import logging
+import sys
 from datetime import datetime, timezone
 
 from apscheduler.schedulers.blocking import BlockingScheduler
@@ -32,6 +36,7 @@ from sqlalchemy import func, select
 from app.collector.blizzard_client import BlizzardClient
 from app.collector.collector import save_commodities, save_realm_auctions
 from app.collector.items import item_ids_in_snapshot, resolve_items
+from app.collector.realms import sync_realms
 from app.config import settings
 from app.database.models import Realm, Snapshot
 from app.database.session import SessionLocal, init_db
@@ -93,20 +98,35 @@ def _last_fetched_at(connected_realm_id: int | None, source: str) -> datetime | 
     return fetched
 
 
+def _ensure_realm_registry(client: BlizzardClient) -> None:
+    """Puebla la tabla realms si está vacía (primer arranque contra una BD nueva).
+
+    Sin esto, en un despliegue limpio (BD cloud recién creada) SCHEDULER_REALMS
+    no podría resolverse a connected_realm_ids y ningún tick capturaría nada.
+    """
+    with SessionLocal() as session:
+        have = session.scalar(select(func.count()).select_from(Realm))
+    if not have:
+        logger.info("Registro de reinos vacío; sincronizándolo desde la API de Blizzard...")
+        sync_realms(client)
+
+
 def capture_market_snapshots() -> None:
     """Un tick del scheduler: snapshot nuevo por reino + metadatos de items nuevos."""
-    realm_ids = _tracked_connected_realm_ids()
-    if not realm_ids and not settings.scheduler_include_commodities:
-        logger.warning(
-            "No hay reinos que capturar: sincroniza alguno primero (sync_realms_batch.py "
-            "o el botón del dashboard) o define SCHEDULER_REALMS en el .env"
-        )
-        return
-
-    logger.info("Tick de captura: %s reinos %s", len(realm_ids), realm_ids)
-    saved = skipped = failed = 0
     client = BlizzardClient()
     try:
+        _ensure_realm_registry(client)
+
+        realm_ids = _tracked_connected_realm_ids()
+        if not realm_ids and not settings.scheduler_include_commodities:
+            logger.warning(
+                "No hay reinos que capturar: sincroniza alguno primero (sync_realms_batch.py "
+                "o el botón del dashboard) o define SCHEDULER_REALMS en el .env"
+            )
+            return
+
+        logger.info("Tick de captura: %s reinos %s", len(realm_ids), realm_ids)
+        saved = skipped = failed = 0
         for cr_id in realm_ids:
             try:
                 count = save_realm_auctions(client, cr_id, since=_last_fetched_at(cr_id, "realm"))
@@ -137,6 +157,13 @@ def capture_market_snapshots() -> None:
 
 def main() -> None:
     init_db()
+
+    if "--once" in sys.argv[1:]:
+        # Un tick y salir: el "cada cuánto" lo decide quien nos invoca
+        # (GitHub Actions, cron, Task Scheduler...), no un proceso residente.
+        capture_market_snapshots()
+        return
+
     interval = settings.scheduler_interval_minutes
 
     scheduler = BlockingScheduler(timezone="UTC")

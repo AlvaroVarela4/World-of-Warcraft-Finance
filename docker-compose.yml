@@ -11,6 +11,28 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wow -d wow_auctions"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Recolector de histórico: captura snapshots de subastas cada
+  # SCHEDULER_INTERVAL_MINUTES mientras el stack esté levantado.
+  # Nota: sigue corriendo en esta máquina; para capturar 24/7 con el PC
+  # apagado usa el workflow de GitHub Actions (.github/workflows/) contra
+  # una BD cloud, o lleva este mismo compose a un VPS.
+  scheduler:
+    build: .
+    container_name: wow_scheduler
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: .env  # credenciales de Blizzard y opciones SCHEDULER_*
+    environment:
+      # dentro de la red de compose la BD es el servicio "db", no localhost
+      DATABASE_URL: postgresql+psycopg2://wow:wow@db:5432/wow_auctions
 
 volumes:
   pgdata:
